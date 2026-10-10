@@ -1,0 +1,927 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Stencil Cam">
+<meta name="theme-color" content="#121416">
+<title>Stencil Cam</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Bebas+Neue&family=Great+Vibes&family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=Oswald:wght@600&family=Pacifico&family=Permanent+Marker&family=Playfair+Display:wght@700&display=swap">
+<style>
+/* Layout: full-bleed camera stage; floating top toolbar; bottom control drawer on a graphite scrim (side drawer on wide screens). Single dark look on purpose: less glare over the work surface. */
+:root {
+  --ground: #121416;
+  --scrim: rgba(18, 20, 22, 0.9);
+  --raised: #1f2226;
+  --rule: #33373d;
+  --chalk: #eceae4;
+  --muted: #9b9fa6;
+  --marigold: #f2b84b;
+  --marigold-ink: #1d1505;
+  --danger: #ff6b5e;
+  --surface-off: #3a3d41;
+  --ui: "IBM Plex Sans Condensed", "Arial Narrow", "Roboto Condensed", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  --r: 10px;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--ground);
+  color: var(--chalk);
+  font: 500 15px/1.35 var(--ui);
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+button, label.btn, select { touch-action: manipulation; }
+:focus-visible { outline: 2px solid var(--marigold); outline-offset: 2px; }
+.vh { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; pointer-events: none; }
+
+/* Stage */
+#stage {
+  position: fixed; inset: 0;
+  touch-action: none;
+  overflow: hidden;
+  background-color: var(--surface-off);
+  background-image:
+    linear-gradient(rgba(255,255,255,.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.05) 1px, transparent 1px);
+  background-size: 24px 24px;
+  background-position: center center;
+}
+#cam { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; }
+#grid { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+#overlay {
+  position: absolute; left: 50%; top: 50%;
+  transform-origin: center center;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+#offNote {
+  position: absolute; left: 16px; right: 16px; top: calc(env(safe-area-inset-top, 0px) + 128px);
+  display: grid; justify-items: center; gap: 6px;
+  text-align: center; color: rgba(236,234,228,.75);
+  pointer-events: none;
+}
+#offNote strong { font-weight: 600; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--chalk); }
+#offNote p { margin: 0; max-width: 34ch; font-size: 14px; }
+#offNote .warn { color: var(--marigold); }
+
+/* Top bar */
+#topbar {
+  position: fixed; top: 0; left: 0; right: 0;
+  padding: calc(env(safe-area-inset-top, 0px) + 10px) 12px 10px;
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  pointer-events: none;
+  background: linear-gradient(rgba(18,20,22,.7), rgba(18,20,22,0));
+}
+#topbar > * { pointer-events: auto; }
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 38px; padding: 0 14px;
+  border: 1px solid var(--rule); border-radius: 999px;
+  background: var(--raised); color: var(--chalk);
+  font-weight: 600; font-size: 14px; letter-spacing: .02em;
+  cursor: pointer; white-space: nowrap;
+}
+.btn:active { transform: translateY(1px); }
+.btn.primary { background: var(--marigold); border-color: var(--marigold); color: var(--marigold-ink); }
+.btn[aria-pressed="true"] { background: var(--marigold); border-color: var(--marigold); color: var(--marigold-ink); }
+.btn.sm { min-height: 34px; padding: 0 12px; font-size: 13px; }
+.btn.flash { animation: flash .5s ease 2; }
+@keyframes flash { 50% { background: var(--danger); border-color: var(--danger); color: #1a0705; } }
+#hud {
+  margin-left: auto;
+  font: 500 12px/1 var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--chalk);
+  background: rgba(18,20,22,.7);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 7px 9px;
+  letter-spacing: .02em;
+  pointer-events: none;
+}
+#hud .lock { color: var(--marigold); }
+
+/* Toast */
+#toast {
+  position: fixed; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 112px);
+  transform: translateX(-50%);
+  max-width: min(92vw, 420px);
+  padding: 10px 14px; border-radius: 8px;
+  background: var(--chalk); color: var(--ground);
+  font-size: 14px; font-weight: 600; text-align: center;
+  box-shadow: 0 6px 24px rgba(0,0,0,.4);
+  pointer-events: none;
+}
+
+/* Panel */
+#panel {
+  position: fixed; left: 0; right: 0; bottom: 0;
+  max-height: 46vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: 12px 16px calc(env(safe-area-inset-bottom, 0px) + 14px);
+  background: var(--scrim);
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+  border-top: 1px solid var(--rule);
+  display: grid; gap: 12px;
+}
+@media (min-width: 820px) and (orientation: landscape) {
+  #panel {
+    left: auto; right: 16px; bottom: 16px; top: 76px;
+    width: 360px; max-height: none;
+    border: 1px solid var(--rule); border-radius: 14px;
+    align-content: start;
+  }
+}
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; min-width: 0; }
+.row > label:first-child:not(.btn):not(.check), .lbl {
+  flex: 0 0 auto; min-width: 74px;
+  font-size: 12px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted);
+}
+.row input[type="range"] { flex: 1 1 140px; min-width: 0; accent-color: var(--marigold); height: 28px; }
+output.num {
+  min-width: 52px; text-align: right;
+  font: 500 13px/1 var(--mono); font-variant-numeric: tabular-nums; color: var(--chalk);
+}
+.opacity-row { padding-bottom: 2px; }
+.tabs { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--rule); border-radius: var(--r); overflow: hidden; }
+.tabs button {
+  min-height: 38px; border: 0; background: transparent; color: var(--muted);
+  font-weight: 600; letter-spacing: .06em; text-transform: uppercase; font-size: 13px; cursor: pointer;
+}
+.tabs button + button { border-left: 1px solid var(--rule); }
+.tabs button[aria-selected="true"] { background: var(--raised); color: var(--chalk); box-shadow: inset 0 -2px 0 var(--marigold); }
+.pane { display: grid; gap: 12px; }
+textarea {
+  width: 100%; min-height: 64px; resize: vertical;
+  padding: 10px 12px; border-radius: var(--r);
+  border: 1px solid var(--rule); background: var(--raised);
+  font-size: 17px; line-height: 1.3;
+  -webkit-user-select: text; user-select: text;
+}
+select {
+  flex: 1 1 160px; min-width: 0; min-height: 38px;
+  padding: 0 10px; border-radius: var(--r);
+  border: 1px solid var(--rule); background: var(--raised);
+}
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--rule); border-radius: 999px; overflow: hidden; }
+.seg button {
+  min-height: 34px; padding: 0 12px; border: 0; background: transparent; color: var(--muted);
+  font-weight: 600; font-size: 13px; cursor: pointer;
+}
+.seg button + button { border-left: 1px solid var(--rule); }
+.seg button[aria-pressed="true"] { background: var(--marigold); color: var(--marigold-ink); }
+.check { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
+.check input { width: 20px; height: 20px; accent-color: var(--marigold); margin: 0; }
+.hint { margin: 0; font-size: 13px; color: var(--muted); max-width: 60ch; }
+.muted { color: var(--muted); font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 120px; }
+.swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+.swatch {
+  width: 32px; height: 32px; border-radius: 50%; cursor: pointer;
+  border: 2px solid var(--rule); padding: 0;
+}
+.swatch[aria-pressed="true"] { border-color: var(--chalk); box-shadow: 0 0 0 2px var(--ground), 0 0 0 4px var(--marigold); }
+input[type="color"] { width: 40px; height: 34px; padding: 0; border: 1px solid var(--rule); border-radius: 8px; background: var(--raised); cursor: pointer; }
+.toggles { gap: 10px 18px; }
+
+/* Hidden-UI mode */
+body.ui-hidden #panel { display: none; }
+body.ui-hidden #topbar [data-full] { display: none; }
+
+@media (prefers-reduced-motion: reduce) { .btn.flash { animation: none; } }
+</style>
+</head>
+<body>
+
+<section id="stage" aria-label="Camera view with overlay">
+  <video id="cam" playsinline muted autoplay hidden></video>
+  <div id="offNote">
+    <strong>Camera off</strong>
+    <p>Tap Start camera, then pinch the overlay to size it and drag to place it.</p>
+    <p class="warn" id="insecure" hidden>This page isn't on an https:// address, so the browser will block the camera. Host it on GitHub Pages or another https site.</p>
+  </div>
+  <canvas id="grid"></canvas>
+  <canvas id="overlay"></canvas>
+</section>
+
+<header id="topbar">
+  <button class="btn primary" id="camBtn" data-full type="button">Start camera</button>
+  <button class="btn" id="peekBtn" type="button" title="Hold to hide the overlay and check your lines">Hold to peek</button>
+  <button class="btn" id="lockBtn" type="button" aria-pressed="false">Lock</button>
+  <button class="btn" id="torchBtn" data-full type="button" aria-pressed="false" hidden>Torch</button>
+  <button class="btn" id="hideBtn" type="button" aria-pressed="false">Hide controls</button>
+  <div id="hud" aria-live="off"></div>
+</header>
+
+<div id="toast" role="status" hidden></div>
+
+<section id="panel" aria-label="Overlay controls">
+  <div class="row opacity-row">
+    <label for="opacity">Opacity</label>
+    <input id="opacity" type="range" min="5" max="100" step="1">
+    <output class="num" id="opacityOut" for="opacity"></output>
+  </div>
+
+  <div class="tabs" role="tablist">
+    <button type="button" role="tab" id="tab-text" aria-controls="pane-text" data-tab="text">Text</button>
+    <button type="button" role="tab" id="tab-image" aria-controls="pane-image" data-tab="image">Image</button>
+    <button type="button" role="tab" id="tab-style" aria-controls="pane-style" data-tab="style">Adjust</button>
+  </div>
+
+  <div class="pane" id="pane-text" role="tabpanel" aria-labelledby="tab-text">
+    <textarea id="text" rows="2" spellcheck="false" autocapitalize="off" placeholder="Type your lettering. New line = new row."></textarea>
+    <div class="row">
+      <label for="font">Font</label>
+      <select id="font"></select>
+      <label class="btn sm" for="fontFile">Add font file</label>
+      <input class="vh" id="fontFile" type="file" accept=".ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2">
+    </div>
+    <div class="row">
+      <span class="lbl">Align</span>
+      <div class="seg" data-key="align">
+        <button type="button" data-v="left">Left</button><button type="button" data-v="center">Center</button><button type="button" data-v="right">Right</button>
+      </div>
+    </div>
+    <div class="row">
+      <span class="lbl">Letters</span>
+      <div class="seg" data-key="style">
+        <button type="button" data-v="fill">Solid</button><button type="button" data-v="outline">Outline</button>
+      </div>
+    </div>
+    <div class="row" id="strokeRow">
+      <label for="stroke">Outline</label>
+      <input id="stroke" type="range" min="2" max="24" step="1">
+      <output class="num" id="strokeOut" for="stroke"></output>
+    </div>
+    <div class="row">
+      <label for="lh">Line gap</label>
+      <input id="lh" type="range" min="0.8" max="2.2" step="0.05">
+      <output class="num" id="lhOut" for="lh"></output>
+    </div>
+    <div class="row">
+      <label class="check"><input type="checkbox" id="guides"> Baseline, x-height and cap-height guides</label>
+    </div>
+  </div>
+
+  <div class="pane" id="pane-image" role="tabpanel" aria-labelledby="tab-image" hidden>
+    <div class="row">
+      <label class="btn primary" for="imgFile">Choose image</label>
+      <input class="vh" id="imgFile" type="file" accept="image/*,.svg">
+      <span class="muted" id="imgName">No image loaded</span>
+    </div>
+    <div class="row">
+      <span class="lbl">Mode</span>
+      <div class="seg" data-key="imgMode">
+        <button type="button" data-v="original">Original</button><button type="button" data-v="ink">Ink</button><button type="button" data-v="edges">Edges</button><button type="button" data-v="invert">Invert</button>
+      </div>
+    </div>
+    <p class="hint" id="modeHint"></p>
+    <div class="row" id="sensRow">
+      <label for="sens">Pickup</label>
+      <input id="sens" type="range" min="0" max="100" step="1">
+      <output class="num" id="sensOut" for="sens"></output>
+    </div>
+  </div>
+
+  <div class="pane" id="pane-style" role="tabpanel" aria-labelledby="tab-style" hidden>
+    <div class="row">
+      <span class="lbl">Color</span>
+      <div class="swatches" id="swatches"></div>
+      <input type="color" id="colorPick" aria-label="Custom overlay color">
+    </div>
+    <div class="row">
+      <span class="lbl">Rotate</span>
+      <button class="btn sm" type="button" data-nudge="r-">−0.5°</button>
+      <output class="num" id="rotOut"></output>
+      <button class="btn sm" type="button" data-nudge="r+">+0.5°</button>
+      <button class="btn sm" type="button" data-nudge="level">Level</button>
+    </div>
+    <div class="row">
+      <span class="lbl">Size</span>
+      <button class="btn sm" type="button" data-nudge="s-">−2%</button>
+      <output class="num" id="sizeOut"></output>
+      <button class="btn sm" type="button" data-nudge="s+">+2%</button>
+      <button class="btn sm" type="button" data-nudge="fit">Fit and center</button>
+    </div>
+    <div class="row toggles">
+      <label class="check"><input type="checkbox" id="snap"> Snap to 0°/90°</label>
+      <label class="check"><input type="checkbox" id="gridOn"> Grid</label>
+      <label class="check"><input type="checkbox" id="flip"> Mirror</label>
+    </div>
+    <p class="hint">Mirror is for tracing from the back of clear film or glass. Size and rotate buttons still work while locked.</p>
+  </div>
+</section>
+
+<script>
+(() => {
+  'use strict';
+
+  // ---------- Config ----------
+  const STORE_KEY = 'stencilcam.v1';
+  const RES = 2;               // overlay canvas pixels per CSS pixel at 100% size
+  const TEXT_PX = 160;         // font size used to rasterize text
+  const IMG_MAX = 2000;        // longest side for loaded images
+  const SNAP_DEG = 3;
+  const FONTS = [
+    { name: 'Playfair Display', css: '"Playfair Display", Georgia, serif', w: 700 },
+    { name: 'Bebas Neue', css: '"Bebas Neue", Impact, sans-serif', w: 400 },
+    { name: 'Anton', css: 'Anton, Impact, sans-serif', w: 400 },
+    { name: 'Oswald', css: 'Oswald, "Arial Narrow", sans-serif', w: 600 },
+    { name: 'Permanent Marker', css: '"Permanent Marker", cursive', w: 400 },
+    { name: 'Pacifico', css: 'Pacifico, cursive', w: 400 },
+    { name: 'Great Vibes', css: '"Great Vibes", cursive', w: 400 },
+    { name: 'Arial (system)', css: 'Arial, Helvetica, sans-serif', w: 700 },
+    { name: 'Georgia (system)', css: 'Georgia, serif', w: 400 },
+  ];
+  const SWATCHES = [
+    ['#ff2bd6', 'Magenta'], ['#19e3ff', 'Cyan'], ['#ffe11a', 'Yellow'],
+    ['#ff3b30', 'Red'], ['#ffffff', 'White'], ['#000000', 'Black'],
+  ];
+  const MODE_HINTS = {
+    original: 'Shows the image as-is. Use a PNG with a transparent background for the cleanest overlay.',
+    ink: 'Dark areas become the overlay color and white turns clear. Best for black-on-white lettering or logos.',
+    edges: 'Traces outlines only. Good for photos. Raise Pickup for more detail.',
+    invert: 'Flips light and dark. Helps white artwork show up on a light wall.',
+  };
+  const DEFAULTS = {
+    tab: 'text', source: 'text',
+    text: 'Welcome', font: 'Playfair Display', align: 'center', style: 'fill', stroke: 6, lh: 1.15, guides: true,
+    imgMode: 'ink', sens: 50,
+    color: '#ff2bd6', opacity: 70, flip: false, grid: false, snap: true,
+    tText: { x: 0, y: 0, s: 0, r: 0 }, tImage: { x: 0, y: 0, s: 0, r: 0 },
+  };
+
+  // ---------- Elements ----------
+  const $ = (s) => document.querySelector(s);
+  const stage = $('#stage'), video = $('#cam'), ov = $('#overlay'), gridCv = $('#grid');
+  const octx = ov.getContext('2d');
+  const mctx = document.createElement('canvas').getContext('2d');
+  const ui = {
+    cam: $('#camBtn'), peek: $('#peekBtn'), lock: $('#lockBtn'), torch: $('#torchBtn'), hide: $('#hideBtn'),
+    hud: $('#hud'), toast: $('#toast'), offNote: $('#offNote'),
+    opacity: $('#opacity'), opacityOut: $('#opacityOut'),
+    text: $('#text'), font: $('#font'), fontFile: $('#fontFile'),
+    stroke: $('#stroke'), strokeOut: $('#strokeOut'), strokeRow: $('#strokeRow'),
+    lh: $('#lh'), lhOut: $('#lhOut'), guides: $('#guides'),
+    imgFile: $('#imgFile'), imgName: $('#imgName'), modeHint: $('#modeHint'),
+    sens: $('#sens'), sensOut: $('#sensOut'), sensRow: $('#sensRow'),
+    swatches: $('#swatches'), colorPick: $('#colorPick'),
+    rotOut: $('#rotOut'), sizeOut: $('#sizeOut'),
+    snap: $('#snap'), grid: $('#gridOn'), flip: $('#flip'),
+  };
+
+  // ---------- State ----------
+  let S = loadState();
+  let locked = false, peeking = false;
+  let stream = null, track = null, torchOn = false, wakeLock = null;
+  let imgBase = null;               // { w, h, data: ImageData, name }
+  let logical = { w: 100, h: 50 };  // overlay size in CSS px at scale 1
+  let renderToken = 0, needsFit = { text: false, image: false };
+  let uploadedFontCount = 0;
+
+  function loadState() {
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || '{}') || {}; } catch (e) { saved = {}; }
+    const s = Object.assign({}, DEFAULTS, saved);
+    s.tText = Object.assign({}, DEFAULTS.tText, saved.tText || {});
+    s.tImage = Object.assign({}, DEFAULTS.tImage, saved.tImage || {});
+    if (!FONTS.some(f => f.name === s.font)) s.font = DEFAULTS.font;
+    s.source = 'text'; // images are not stored between visits
+    if (s.tab === 'image') s.tab = 'text';
+    return s;
+  }
+  let saveTimer = 0;
+  function saveSoon() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); } catch (e) { /* storage unavailable */ }
+    }, 300);
+  }
+  const T = () => (S.source === 'image' ? S.tImage : S.tText);
+
+  // ---------- Helpers ----------
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const fontByName = (n) => FONTS.find(f => f.name === n) || FONTS[0];
+  function hexRgb(hex) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
+    const n = m ? parseInt(m[1], 16) : 0xff2bd6;
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+  function normDeg(d) { d = ((d + 180) % 360 + 360) % 360 - 180; return d === -180 ? 180 : d; }
+  function shownRot() {
+    const r = normDeg(T().r);
+    if (!S.snap) return r;
+    const near = Math.round(r / 90) * 90;
+    return Math.abs(r - near) <= SNAP_DEG ? normDeg(near) : r;
+  }
+  let toastTimer = 0;
+  function toast(msg, ms = 2600) {
+    ui.toast.textContent = msg; ui.toast.hidden = false;
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => { ui.toast.hidden = true; }, ms);
+  }
+  function visibleBox() {
+    const r = stage.getBoundingClientRect();
+    const top = $('#topbar').getBoundingClientRect().bottom;
+    const panel = $('#panel');
+    let bottom = r.height, right = r.width;
+    if (!document.body.classList.contains('ui-hidden')) {
+      const p = panel.getBoundingClientRect();
+      if (p.width < r.width * 0.6) right = p.left - 8; // side drawer
+      else bottom = p.top;
+    }
+    return { r, top, bottom: Math.max(top + 80, bottom), left: 0, right: Math.max(160, right) };
+  }
+
+  // ---------- Rendering ----------
+  async function render() {
+    const tok = ++renderToken;
+    if (S.source === 'image' && imgBase) renderImage();
+    else await renderText(tok);
+    if (tok !== renderToken) return;
+    const key = S.source === 'image' ? 'image' : 'text';
+    if (needsFit[key] || T().s <= 0) { needsFit[key] = false; fit(); }
+    applyTransform();
+  }
+
+  function setLogical(wPx, hPx) {
+    logical = { w: wPx / RES, h: hPx / RES };
+    ov.style.width = logical.w + 'px';
+    ov.style.height = logical.h + 'px';
+  }
+
+  async function renderText(tok) {
+    const f = fontByName(S.font);
+    const fs = TEXT_PX;
+    const fontStr = `${f.w} ${fs}px ${f.css}`;
+    try { await document.fonts.load(fontStr, S.text || 'A'); } catch (e) { /* fall back silently */ }
+    if (tok !== renderToken) return;
+
+    mctx.font = fontStr;
+    const lines = (S.text || ' ').replace(/\r/g, '').split('\n');
+    const widths = lines.map(l => mctx.measureText(l).width);
+    const ref = mctx.measureText('Hxgy');
+    const asc = ref.fontBoundingBoxAscent || fs * 0.92;
+    const desc = ref.fontBoundingBoxDescent || fs * 0.28;
+    const cap = mctx.measureText('H').actualBoundingBoxAscent || fs * 0.7;
+    const xh = mctx.measureText('x').actualBoundingBoxAscent || fs * 0.48;
+    const lineStep = fs * S.lh;
+    const maxW = Math.max(1, ...widths);
+    const stroke = S.style === 'outline' ? S.stroke : 0;
+    const padX = fs * 0.2 + stroke + (S.guides ? fs * 0.35 : 0);
+    const padY = fs * 0.15 + stroke;
+    const W = Math.ceil(maxW + padX * 2);
+    const H = Math.ceil(asc + desc + lineStep * (lines.length - 1) + padY * 2);
+    const k = Math.min(1, 4096 / W, 4096 / H, Math.sqrt(12e6 / (W * H)));
+
+    ov.width = Math.max(1, Math.round(W * k));
+    ov.height = Math.max(1, Math.round(H * k));
+    setLogical(W, H);
+    const c = octx;
+    c.setTransform(k, 0, 0, k, 0, 0);
+    c.clearRect(0, 0, W, H);
+    c.font = fontStr;
+    c.textAlign = 'left';
+    c.textBaseline = 'alphabetic';
+
+    lines.forEach((ln, i) => {
+      const by = padY + asc + i * lineStep;
+      if (S.guides) {
+        const x0 = fs * 0.06, x1 = W - fs * 0.06;
+        c.save();
+        c.strokeStyle = S.color; c.globalAlpha = 0.75;
+        c.lineWidth = 2.5; c.setLineDash([]);
+        c.beginPath(); c.moveTo(x0, by); c.lineTo(x1, by); c.stroke();
+        c.lineWidth = 2; c.setLineDash([14, 10]); c.globalAlpha = 0.55;
+        c.beginPath(); c.moveTo(x0, by - xh); c.lineTo(x1, by - xh); c.stroke();
+        c.beginPath(); c.moveTo(x0, by - cap); c.lineTo(x1, by - cap); c.stroke();
+        c.restore();
+      }
+      const x = padX + (S.align === 'left' ? 0 : S.align === 'right' ? maxW - widths[i] : (maxW - widths[i]) / 2);
+      if (S.style === 'outline') {
+        c.lineWidth = stroke; c.lineJoin = 'round'; c.miterLimit = 2;
+        c.strokeStyle = S.color; c.strokeText(ln, x, by);
+      } else {
+        c.fillStyle = S.color; c.fillText(ln, x, by);
+      }
+    });
+  }
+
+  function renderImage() {
+    const { w, h, data } = imgBase;
+    ov.width = w; ov.height = h;
+    setLogical(w, h);
+    octx.setTransform(1, 0, 0, 1, 0, 0);
+    octx.clearRect(0, 0, w, h);
+    octx.putImageData(processImage(data, w, h), 0, 0);
+  }
+
+  function processImage(src, w, h) {
+    const mode = S.imgMode;
+    if (mode === 'original') return src;
+    const d = src.data, out = new ImageData(w, h), o = out.data;
+    if (mode === 'invert') {
+      for (let i = 0; i < d.length; i += 4) {
+        o[i] = 255 - d[i]; o[i + 1] = 255 - d[i + 1]; o[i + 2] = 255 - d[i + 2]; o[i + 3] = d[i + 3];
+      }
+      return out;
+    }
+    const [cr, cg, cb] = hexRgb(S.color);
+    const n = w * h, L = new Float32Array(n);
+    for (let p = 0, i = 0; p < n; p++, i += 4) {
+      const a = d[i + 3] / 255;
+      const l = (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) / 255;
+      L[p] = a * l + (1 - a); // transparent counts as white
+    }
+    if (mode === 'ink') {
+      const t = 0.15 + S.sens * 0.008, soft = t * 0.35;
+      for (let p = 0, i = 0; p < n; p++, i += 4) {
+        const v = L[p];
+        const a = v >= t ? 0 : Math.min(1, (t - v) / soft);
+        o[i] = cr; o[i + 1] = cg; o[i + 2] = cb; o[i + 3] = a * 255;
+      }
+      return out;
+    }
+    // edges: 3x3 box blur then Sobel
+    const B = new Float32Array(n);
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        const p = y * w + x;
+        B[p] = (L[p - w - 1] + L[p - w] + L[p - w + 1] + L[p - 1] + L[p] + L[p + 1] + L[p + w - 1] + L[p + w] + L[p + w + 1]) / 9;
+      }
+    }
+    const thr = 1.4 - S.sens * 0.0125;
+    for (let y = 2; y < h - 2; y++) {
+      for (let x = 2; x < w - 2; x++) {
+        const p = y * w + x;
+        const tl = B[p - w - 1], t = B[p - w], tr = B[p - w + 1], l = B[p - 1], r = B[p + 1], bl = B[p + w - 1], b = B[p + w], br = B[p + w + 1];
+        const gx = (tr + 2 * r + br) - (tl + 2 * l + bl);
+        const gy = (bl + 2 * b + br) - (tl + 2 * t + tr);
+        const m = Math.sqrt(gx * gx + gy * gy);
+        if (m > thr) {
+          const i = p * 4;
+          o[i] = cr; o[i + 1] = cg; o[i + 2] = cb;
+          o[i + 3] = Math.min(255, 110 + ((m - thr) / thr) * 400);
+        }
+      }
+    }
+    return out;
+  }
+
+  function applyTransform() {
+    const t = T();
+    const r = shownRot();
+    const sx = t.s * (S.flip ? -1 : 1);
+    ov.style.transform = `translate(-50%, -50%) translate(${t.x}px, ${t.y}px) rotate(${r}deg) scale(${sx}, ${t.s})`;
+    ov.style.opacity = peeking ? 0 : S.opacity / 100;
+    const rTxt = (r >= 0 ? ' ' : '') + r.toFixed(1) + '°';
+    const sTxt = Math.round(t.s * 100) + '%';
+    ui.hud.innerHTML = `ROT ${rTxt} &nbsp;SIZE ${sTxt}` + (locked ? ' &nbsp;<span class="lock">LOCKED</span>' : '');
+    ui.rotOut.textContent = rTxt.trim();
+    ui.sizeOut.textContent = sTxt;
+    saveSoon();
+  }
+
+  function fit() {
+    const t = T();
+    const v = visibleBox();
+    const availW = (v.right - v.left) * 0.86, availH = (v.bottom - v.top) * 0.7;
+    t.s = clamp(Math.min(availW / logical.w, availH / logical.h), 0.05, 40);
+    t.r = 0;
+    t.x = (v.left + v.right) / 2 - v.r.width / 2;
+    t.y = (v.top + v.bottom) / 2 - v.r.height / 2;
+  }
+
+  // ---------- Grid ----------
+  function drawGrid() {
+    const r = stage.getBoundingClientRect();
+    const dpr = Math.min(3, window.devicePixelRatio || 1);
+    gridCv.width = Math.round(r.width * dpr); gridCv.height = Math.round(r.height * dpr);
+    const g = gridCv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, r.width, r.height);
+    if (!S.grid) return;
+    const step = Math.min(r.width, r.height) / 6, cx = r.width / 2, cy = r.height / 2;
+    const lines = [];
+    for (let x = cx % step; x <= r.width; x += step) lines.push([x, 0, x, r.height, Math.abs(x - cx) < 0.5]);
+    for (let y = cy % step; y <= r.height; y += step) lines.push([0, y, r.width, y, Math.abs(y - cy) < 0.5]);
+    for (const pass of [0, 1]) {
+      for (const [x1, y1, x2, y2, center] of lines) {
+        g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2);
+        if (pass === 0) { g.strokeStyle = 'rgba(0,0,0,.35)'; g.lineWidth = center ? 3 : 2; }
+        else { g.strokeStyle = center ? 'rgba(242,184,75,.95)' : 'rgba(255,255,255,.55)'; g.lineWidth = 1; }
+        g.stroke();
+      }
+    }
+  }
+
+  // ---------- Gestures ----------
+  const pts = new Map();
+  let last = null, lockToastAt = 0;
+  function gesture() {
+    const a = [...pts.values()];
+    if (a.length === 1) return { n: 1, mx: a[0].x, my: a[0].y, d: 0, ang: 0 };
+    const [p, q] = a;
+    return { n: 2, mx: (p.x + q.x) / 2, my: (p.y + q.y) / 2, d: Math.hypot(q.x - p.x, q.y - p.y), ang: Math.atan2(q.y - p.y, q.x - p.x) };
+  }
+  stage.addEventListener('pointerdown', (e) => {
+    if (locked) {
+      const now = Date.now();
+      if (now - lockToastAt > 2500) {
+        lockToastAt = now;
+        ui.lock.classList.remove('flash'); void ui.lock.offsetWidth; ui.lock.classList.add('flash');
+        toast('Overlay is locked. Tap Lock to move it.');
+      }
+      return;
+    }
+    try { stage.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    last = gesture();
+  });
+  stage.addEventListener('pointermove', (e) => {
+    if (!pts.has(e.pointerId)) return;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const cur = gesture(), t = T();
+    if (last && cur.n === last.n) {
+      if (cur.n === 1) {
+        t.x += cur.mx - last.mx; t.y += cur.my - last.my;
+      } else if (last.d > 0) {
+        const k = cur.d / last.d, da = cur.ang - last.ang;
+        const r = stage.getBoundingClientRect();
+        const ox = r.left + r.width / 2, oy = r.top + r.height / 2;
+        const vx = ox + t.x - last.mx, vy = oy + t.y - last.my;
+        const cos = Math.cos(da), sin = Math.sin(da);
+        const newS = clamp(t.s * k, 0.05, 40), kk = newS / t.s;
+        t.x = cur.mx + (vx * cos - vy * sin) * kk - ox;
+        t.y = cur.my + (vx * sin + vy * cos) * kk - oy;
+        t.s = newS;
+        t.r = normDeg(t.r + da * 180 / Math.PI);
+      }
+      applyTransform();
+    }
+    last = cur;
+  });
+  ['pointerup', 'pointercancel'].forEach(type => stage.addEventListener(type, (e) => {
+    pts.delete(e.pointerId);
+    last = pts.size ? gesture() : null;
+  }));
+  stage.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    if (locked) return;
+    const t = T();
+    if (e.shiftKey) t.r = normDeg(t.r + (e.deltaY > 0 ? 1 : -1));
+    else t.s = clamp(t.s * Math.exp(-e.deltaY * 0.0015), 0.05, 40);
+    applyTransform();
+  }, { passive: false });
+  // Stop iOS page pinch-zoom from fighting the overlay gesture
+  ['gesturestart', 'gesturechange'].forEach(t => document.addEventListener(t, e => e.preventDefault()));
+
+  // ---------- Camera ----------
+  async function startCamera() {
+    if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      toast('The camera needs an https:// address. Host this file on GitHub Pages and open it there.', 5000);
+      return;
+    }
+    ui.cam.disabled = true;
+    try {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+        });
+      } catch (err) {
+        if (err && (err.name === 'OverconstrainedError' || err.name === 'NotFoundError')) {
+          stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        } else { throw err; }
+      }
+      video.srcObject = stream;
+      video.hidden = false;
+      ui.offNote.hidden = true;
+      try { await video.play(); } catch (e) { /* autoplay attribute will retry */ }
+      track = stream.getVideoTracks()[0];
+      track.addEventListener('ended', () => { if (stream) stopCamera(); });
+      const caps = track.getCapabilities ? track.getCapabilities() : {};
+      ui.torch.hidden = !(caps && caps.torch);
+      ui.cam.textContent = 'Stop camera';
+      ui.cam.classList.remove('primary');
+      keepAwake();
+    } catch (err) {
+      const name = err && err.name;
+      if (name === 'NotAllowedError' || name === 'SecurityError') toast('Camera access was blocked. Allow the camera for this site in your browser settings, then try again.', 5000);
+      else if (name === 'NotReadableError') toast('Another app is using the camera. Close it and try again.', 4000);
+      else toast('Could not start the camera on this device.', 4000);
+      stream = null; track = null;
+    } finally {
+      ui.cam.disabled = false;
+    }
+  }
+  function stopCamera() {
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    stream = null; track = null; torchOn = false;
+    video.srcObject = null; video.hidden = true; ui.offNote.hidden = false;
+    ui.torch.hidden = true; ui.torch.setAttribute('aria-pressed', 'false');
+    ui.cam.textContent = 'Start camera'; ui.cam.classList.add('primary');
+    if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+  }
+  async function keepAwake() {
+    try {
+      if ('wakeLock' in navigator && document.visibilityState === 'visible') {
+        wakeLock = await navigator.wakeLock.request('screen');
+      }
+    } catch (e) { /* not granted; screen may dim */ }
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (stream && track && track.readyState === 'ended') { stopCamera(); startCamera(); }
+    else if (stream) keepAwake();
+  });
+  ui.cam.addEventListener('click', () => (stream ? stopCamera() : startCamera()));
+  ui.torch.addEventListener('click', async () => {
+    if (!track) return;
+    try {
+      await track.applyConstraints({ advanced: [{ torch: !torchOn }] });
+      torchOn = !torchOn;
+      ui.torch.setAttribute('aria-pressed', String(torchOn));
+    } catch (e) { toast('This camera does not support the torch.'); }
+  });
+
+  // ---------- Top bar ----------
+  const setPeek = (v) => { peeking = v; ui.peek.setAttribute('aria-pressed', String(v)); applyTransform(); };
+  ui.peek.addEventListener('pointerdown', (e) => { e.preventDefault(); setPeek(true); });
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach(t => ui.peek.addEventListener(t, () => peeking && setPeek(false)));
+  ui.peek.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setPeek(true); } });
+  ui.peek.addEventListener('keyup', () => setPeek(false));
+  ui.peek.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  ui.lock.addEventListener('click', () => {
+    locked = !locked;
+    ui.lock.setAttribute('aria-pressed', String(locked));
+    ui.lock.textContent = locked ? 'Locked' : 'Lock';
+    pts.clear(); last = null;
+    applyTransform();
+  });
+  ui.hide.addEventListener('click', () => {
+    const hidden = document.body.classList.toggle('ui-hidden');
+    ui.hide.setAttribute('aria-pressed', String(hidden));
+    ui.hide.textContent = hidden ? 'Show controls' : 'Hide controls';
+  });
+
+  // ---------- Panel controls ----------
+  function setTab(tab) {
+    S.tab = tab;
+    document.querySelectorAll('[role="tab"]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === tab)));
+    ['text', 'image', 'style'].forEach(p => { $('#pane-' + p).hidden = p !== tab; });
+    if (tab === 'text' && S.source !== 'text') { S.source = 'text'; render(); }
+    if (tab === 'image' && imgBase && S.source !== 'image') { S.source = 'image'; render(); }
+    saveSoon();
+  }
+  document.querySelectorAll('[role="tab"]').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
+
+  function syncControls() {
+    ui.opacity.value = S.opacity; ui.opacityOut.textContent = S.opacity + '%';
+    ui.text.value = S.text;
+    ui.font.value = S.font;
+    ui.stroke.value = S.stroke; ui.strokeOut.textContent = S.stroke + ' px';
+    ui.strokeRow.hidden = S.style !== 'outline';
+    ui.lh.value = S.lh; ui.lhOut.textContent = Number(S.lh).toFixed(2) + '×';
+    ui.guides.checked = S.guides;
+    ui.sens.value = S.sens; ui.sensOut.textContent = S.sens;
+    ui.sensRow.hidden = !(S.imgMode === 'ink' || S.imgMode === 'edges');
+    ui.modeHint.textContent = MODE_HINTS[S.imgMode];
+    ui.snap.checked = S.snap; ui.grid.checked = S.grid; ui.flip.checked = S.flip;
+    ui.colorPick.value = S.color;
+    ui.swatches.querySelectorAll('.swatch').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.c.toLowerCase() === S.color.toLowerCase())));
+    document.querySelectorAll('.seg').forEach(seg => {
+      seg.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(S[seg.dataset.key] === b.dataset.v)));
+    });
+  }
+
+  function buildFontOptions() {
+    ui.font.innerHTML = '';
+    FONTS.forEach(f => {
+      const o = document.createElement('option');
+      o.value = f.name; o.textContent = f.name;
+      ui.font.appendChild(o);
+    });
+  }
+  function buildSwatches() {
+    SWATCHES.forEach(([c, name]) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'swatch'; b.dataset.c = c;
+      b.style.background = c; b.setAttribute('aria-label', name);
+      b.addEventListener('click', () => { S.color = c; syncControls(); render(); });
+      ui.swatches.appendChild(b);
+    });
+  }
+
+  ui.opacity.addEventListener('input', () => { S.opacity = +ui.opacity.value; ui.opacityOut.textContent = S.opacity + '%'; applyTransform(); });
+  ui.text.addEventListener('input', () => { S.text = ui.text.value; if (S.source !== 'text') S.source = 'text'; render(); });
+  ui.font.addEventListener('change', () => { S.font = ui.font.value; render(); });
+  ui.stroke.addEventListener('input', () => { S.stroke = +ui.stroke.value; syncControls(); render(); });
+  ui.lh.addEventListener('input', () => { S.lh = +ui.lh.value; syncControls(); render(); });
+  ui.guides.addEventListener('change', () => { S.guides = ui.guides.checked; render(); });
+  let sensTimer = 0;
+  ui.sens.addEventListener('input', () => {
+    S.sens = +ui.sens.value; ui.sensOut.textContent = S.sens;
+    clearTimeout(sensTimer); sensTimer = setTimeout(render, 60);
+  });
+  ui.colorPick.addEventListener('input', () => { S.color = ui.colorPick.value; syncControls(); render(); });
+  ui.snap.addEventListener('change', () => { S.snap = ui.snap.checked; applyTransform(); });
+  ui.flip.addEventListener('change', () => { S.flip = ui.flip.checked; applyTransform(); });
+  ui.grid.addEventListener('change', () => { S.grid = ui.grid.checked; drawGrid(); saveSoon(); });
+
+  document.querySelectorAll('.seg').forEach(seg => seg.addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    S[seg.dataset.key] = b.dataset.v;
+    syncControls(); render();
+  }));
+
+  document.querySelectorAll('[data-nudge]').forEach(b => b.addEventListener('click', () => {
+    const t = T();
+    switch (b.dataset.nudge) {
+      case 'r-': t.r = normDeg(shownRot() - 0.5); break;
+      case 'r+': t.r = normDeg(shownRot() + 0.5); break;
+      case 'level': t.r = 0; break;
+      case 's-': t.s = clamp(t.s / 1.02, 0.05, 40); break;
+      case 's+': t.s = clamp(t.s * 1.02, 0.05, 40); break;
+      case 'fit': fit(); break;
+    }
+    applyTransform();
+  }));
+
+  ui.imgFile.addEventListener('change', async () => {
+    const file = ui.imgFile.files && ui.imgFile.files[0];
+    ui.imgFile.value = '';
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    try {
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      const isSvg = /svg/i.test(file.type) || /\.svg$/i.test(file.name);
+      let w = img.naturalWidth || 1000, h = img.naturalHeight || 1000;
+      const k = isSvg ? IMG_MAX / Math.max(w, h) : Math.min(1, IMG_MAX / Math.max(w, h));
+      const cw = Math.max(1, Math.round(w * k)), ch = Math.max(1, Math.round(h * k));
+      const cv = document.createElement('canvas'); cv.width = cw; cv.height = ch;
+      const cx = cv.getContext('2d', { willReadFrequently: true });
+      cx.drawImage(img, 0, 0, cw, ch);
+      imgBase = { w: cw, h: ch, data: cx.getImageData(0, 0, cw, ch), name: file.name };
+      ui.imgName.textContent = file.name;
+      S.source = 'image';
+      needsFit.image = true;
+      await render();
+    } catch (e) {
+      toast("Couldn't open that file. Use a PNG, JPG or SVG.");
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  });
+
+  ui.fontFile.addEventListener('change', async () => {
+    const file = ui.fontFile.files && ui.fontFile.files[0];
+    ui.fontFile.value = '';
+    if (!file) return;
+    try {
+      const buf = await file.arrayBuffer();
+      const family = 'StencilUserFont' + (++uploadedFontCount);
+      const face = new FontFace(family, buf);
+      await face.load();
+      document.fonts.add(face);
+      const name = file.name.replace(/\.[^.]+$/, '') + ' (your file)';
+      FONTS.push({ name, css: `"${family}"`, w: 400 });
+      const o = document.createElement('option'); o.value = name; o.textContent = name; ui.font.appendChild(o);
+      S.font = name; S.source = 'text';
+      syncControls(); await render();
+      toast('Font added for this session.');
+    } catch (e) {
+      toast("Couldn't load that font. Use a .ttf, .otf, .woff or .woff2 file.");
+    }
+  });
+
+  // ---------- Boot ----------
+  if (!window.isSecureContext) $('#insecure').hidden = false;
+  buildFontOptions();
+  buildSwatches();
+  syncControls();
+  setTab(S.tab);
+  let resizeTimer = 0;
+  window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(drawGrid, 120); });
+  drawGrid();
+  render();
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => render());
+})();
+</script>
+</body>
+</html>
